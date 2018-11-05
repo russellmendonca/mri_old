@@ -72,56 +72,58 @@ class GaussianMLPPolicy(StochasticPolicy, Serializable):
         action_dim = env_spec.action_space.flat_dim
 
         # create network
-        if mean_network is None:
-            self.mean_params = mean_params = self.create_MLP(
-                name="mean_network",
-                input_shape=(None, obs_dim,),
-                output_dim=action_dim,
-                hidden_sizes=hidden_sizes,
-            )
-            input_tensor, mean_tensor = self.forward_MLP('mean_network', mean_params, n_hidden=len(hidden_sizes),
-                input_shape=(obs_dim,),
-                hidden_nonlinearity=hidden_nonlinearity,
-                output_nonlinearity=output_nonlinearity,
-                reuse=None # Needed for batch norm
-            )
-            # if you want to input your own thing.
-            self._forward_mean = lambda x, is_train: self.forward_MLP('mean_network', mean_params, n_hidden=len(hidden_sizes),
-                hidden_nonlinearity=hidden_nonlinearity, output_nonlinearity=output_nonlinearity, input_tensor=x, is_training=is_train)[1]
-        else:
-            raise NotImplementedError('Chelsea does not support this.')
-
-        if std_network is not None:
-            raise NotImplementedError('Minimal Gaussian MLP does not support this.')
-        else:
-            if adaptive_std:
-                # NOTE - this branch isn't tested
-                raise NotImplementedError('Minimal Gaussian MLP doesnt have a tested version of this.')
-                self.std_params = std_params = self.create_MLP(
-                    name="std_network",
+        self.varScope = name
+        with tf.variable_scope(name):
+            if mean_network is None:
+                self.mean_params = mean_params = self.create_MLP(
+                    name="mean_network",
                     input_shape=(None, obs_dim,),
                     output_dim=action_dim,
-                    hidden_sizes=std_hidden_sizes,
+                    hidden_sizes=hidden_sizes,
+                )
+                input_tensor, mean_tensor = self.forward_MLP('mean_network', mean_params, n_hidden=len(hidden_sizes),
+                    input_shape=(obs_dim,),
+                    hidden_nonlinearity=hidden_nonlinearity,
+                    output_nonlinearity=output_nonlinearity,
+                    reuse=None # Needed for batch norm
                 )
                 # if you want to input your own thing.
-                self._forward_std = lambda x: self.forward_MLP('std_network', std_params, n_hidden=len(hidden_sizes),
-                                                                  hidden_nonlinearity=std_hidden_nonlinearity,
-                                                                output_nonlinearity=tf.identity,
-                                                                input_tensor=x)[1]
+                self._forward_mean = lambda x, is_train: self.forward_MLP('mean_network', mean_params, n_hidden=len(hidden_sizes),
+                    hidden_nonlinearity=hidden_nonlinearity, output_nonlinearity=output_nonlinearity, input_tensor=x, is_training=is_train)[1]
             else:
-                if std_parametrization == 'exp':
-                    init_std_param = np.log(init_std)
-                elif std_parametrization == 'softplus':
-                    init_std_param = np.log(np.exp(init_std) - 1)
+                raise NotImplementedError('Chelsea does not support this.')
+
+            if std_network is not None:
+                raise NotImplementedError('Minimal Gaussian MLP does not support this.')
+            else:
+                if adaptive_std:
+                    # NOTE - this branch isn't tested
+                    raise NotImplementedError('Minimal Gaussian MLP doesnt have a tested version of this.')
+                    self.std_params = std_params = self.create_MLP(
+                        name="std_network",
+                        input_shape=(None, obs_dim,),
+                        output_dim=action_dim,
+                        hidden_sizes=std_hidden_sizes,
+                    )
+                    # if you want to input your own thing.
+                    self._forward_std = lambda x: self.forward_MLP('std_network', std_params, n_hidden=len(hidden_sizes),
+                                                                      hidden_nonlinearity=std_hidden_nonlinearity,
+                                                                    output_nonlinearity=tf.identity,
+                                                                    input_tensor=x)[1]
                 else:
-                    raise NotImplementedError
-                self.std_params = make_param_layer(
-                    num_units=action_dim,
-                    param=tf.constant_initializer(init_std_param),
-                    name="output_std_param",
-                    trainable=learn_std,
-                )
-                self._forward_std = lambda x: forward_param_layer(x, self.std_params)
+                    if std_parametrization == 'exp':
+                        init_std_param = np.log(init_std)
+                    elif std_parametrization == 'softplus':
+                        init_std_param = np.log(np.exp(init_std) - 1)
+                    else:
+                        raise NotImplementedError
+                    self.std_params = make_param_layer(
+                        num_units=action_dim,
+                        param=tf.constant_initializer(init_std_param),
+                        name="output_std_param",
+                        trainable=learn_std,
+                    )
+                    self._forward_std = lambda x: forward_param_layer(x, self.std_params)
 
         self.std_parametrization = std_parametrization
 
@@ -152,6 +154,20 @@ class GaussianMLPPolicy(StochasticPolicy, Serializable):
     @property
     def vectorized(self):
         return True
+
+
+    def compute_stateAction_log_likelihood(self, observations, actions):
+        
+        flat_obs = self.observation_space.flatten_n(observations)
+        means, log_stds = self._f_dist(flat_obs) # _f_dist runs the network forward.
+        
+        return self._dist.log_likelihood(actions, {"mean" : means , "log_std" : log_stds})
+
+        # rnd = np.random.normal(size=means.shape)
+        # actions = rnd * np.exp(log_stds) + means
+        # return actions, dict(mean=means, log_std=log_stds)
+
+
 
     def dist_info_sym(self, obs_var, state_info_vars=None, is_training=True):
         # This function constructs the tf graph, only called during beginning of training
@@ -197,7 +213,7 @@ class GaussianMLPPolicy(StochasticPolicy, Serializable):
             params = tf.all_variables()
 
         # TODO - this is hacky...
-        params = [p for p in params if p.name.startswith('mean_network') or p.name.startswith('output_std_param')]
+        params = [p for p in params if p.name.startswith(self.varScope+'/mean_network') or p.name.startswith(self.varScope+'/output_std_param')]
         params = [p for p in params if 'Adam' not in p.name]
         return params
 

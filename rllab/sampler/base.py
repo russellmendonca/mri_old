@@ -45,7 +45,7 @@ class BaseSampler(Sampler):
         """
         self.algo = algo
 
-    def process_samples(self, itr, paths, prefix='', log=True):
+    def process_samples(self, itr, paths, prefix='', log=True, dictPaths =None):
         baselines = []
         returns = []
 
@@ -174,6 +174,7 @@ class BaseSampler(Sampler):
             #logger.record_tabular('Iteration', itr)
             #logger.record_tabular('AverageDiscountedReturn',
             #                      average_discounted_return)
+
             logger.record_tabular(prefix+'AverageReturn', np.mean(undiscounted_returns))
             logger.record_tabular(prefix+'ExplainedVariance', ev)
             logger.record_tabular(prefix+'NumTrajs', len(paths))

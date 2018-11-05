@@ -67,6 +67,8 @@ class MAMLGaussianMLPPolicy(StochasticPolicy, Serializable):
         :return:
         """
         Serializable.quick_init(self, locals())
+
+       
         assert isinstance(env_spec.action_space, Box)
 
         obs_dim = env_spec.observation_space.flat_dim
@@ -301,10 +303,28 @@ class MAMLGaussianMLPPolicy(StochasticPolicy, Serializable):
         return self.dist_info_sym(new_obs_var, all_params=params_dict, is_training=is_training)
 
 
+
+    def get_deterministic_action(self, observation, idx=None):
+        # this function takes a numpy array observations and outputs randomly sampled actions.
+        # idx: index corresponding to the task/updated policy.
+
+
+        
+        flat_obs = self.observation_space.flatten(observation)
+        f_dist = self._cur_f_dist
+        mean, log_std = [x[0] for x in f_dist([flat_obs])]
+        rnd = np.random.normal(size=mean.shape)
+        action =  mean
+        return action, dict(mean=mean, log_std=log_std)
+
+
     @overrides
     def get_action(self, observation, idx=None):
         # this function takes a numpy array observations and outputs randomly sampled actions.
         # idx: index corresponding to the task/updated policy.
+
+
+       
         flat_obs = self.observation_space.flatten(observation)
         f_dist = self._cur_f_dist
         mean, log_std = [x[0] for x in f_dist([flat_obs])]
@@ -315,8 +335,12 @@ class MAMLGaussianMLPPolicy(StochasticPolicy, Serializable):
     def get_actions(self, observations):
         # this function takes a numpy array observations and outputs sampled actions.
         # Assumes that there is one observation per post-update policy distr
+        
+
         flat_obs = self.observation_space.flatten_n(observations)
+
         result = self._cur_f_dist(flat_obs)
+
 
         if len(result) == 2:
             # NOTE - this code assumes that there aren't 2 meta tasks in a batch
@@ -339,9 +363,10 @@ class MAMLGaussianMLPPolicy(StochasticPolicy, Serializable):
         else:
             params = tf.global_variables()
 
+       
         params = [p for p in params if p.name.startswith('mean_network') or p.name.startswith('output_std_param')]
         params = [p for p in params if 'Adam' not in p.name]
-
+       
         return params
 
 

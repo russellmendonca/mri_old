@@ -188,6 +188,8 @@ table_printer = TerminalTablePrinter()
 
 def dump_tabular(*args, **kwargs):
     wh = kwargs.pop("write_header", None)
+
+    
     if len(_tabular) > 0:
         if _log_tabular_only:
             table_printer.print_tabular(_tabular)

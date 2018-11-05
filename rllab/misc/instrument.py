@@ -384,6 +384,8 @@ def run_experiment_lite(
     :param periodic_sync_interval: Time interval between each periodic sync, in seconds.
     """
     assert stub_method_call is not None or batch_tasks is not None, "Must provide at least either stub_method_call or batch_tasks"
+
+   
     if batch_tasks is None:
         batch_tasks = [
             dict(
@@ -1208,6 +1210,7 @@ def to_lab_kube_pod(
 def concretize(maybe_stub):
     if isinstance(maybe_stub, StubMethodCall):
         obj = concretize(maybe_stub.obj)
+
         method = getattr(obj, maybe_stub.method_name)
         args = concretize(maybe_stub.args)
         kwargs = concretize(maybe_stub.kwargs)

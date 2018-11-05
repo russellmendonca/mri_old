@@ -25,10 +25,18 @@ if __name__ == "__main__":
     tri = 0
     while True:
         tri += 1
-        with tf.Session() as sess:
+
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth=True
+
+        with tf.Session(config = config) as sess:
             data = joblib.load(args.file)
             policy = data['policy']
+
+          
             env = data['env']
+
+
             while True:
                 path = rollout(env, policy, max_path_length=args.max_path_length,
                                animated=True, speedup=args.speedup, video_filename=args.video_filename)

@@ -28,6 +28,8 @@ class VecEnvExecutor(object):
         return obs, rewards, dones, tensor_utils.stack_tensor_dict_list(env_infos)
 
     def reset(self, reset_args=None):
+
+        
         if reset_args is not None:
             results = [env.reset(reset_args=arg) for env, arg in zip(self.envs, reset_args)]
         else:

@@ -104,7 +104,11 @@ class BatchPolopt(RLAlgorithm):
         return self.sampler.process_samples(itr, paths)
 
     def train(self):
-        with tf.Session() as sess:
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth=True
+        
+
+        with tf.Session(config = config) as sess:
             if self.load_policy is not None:
                 import joblib
                 self.policy = joblib.load(self.load_policy)['policy']
@@ -119,6 +123,7 @@ class BatchPolopt(RLAlgorithm):
             sess.run(tf.initialize_variables(uninit_vars))
             #sess.run(tf.initialize_all_variables())
             self.start_worker()
+
             start_time = time.time()
             for itr in range(self.start_itr, self.n_itr):
                 itr_start_time = time.time()
@@ -143,11 +148,17 @@ class BatchPolopt(RLAlgorithm):
                     logger.record_tabular('Time', time.time() - start_time)
                     logger.record_tabular('ItrTime', time.time() - itr_start_time)
 
-                    #import pickle
-                    #with open('paths_itr'+str(itr)+'.pkl', 'wb') as f:
-                    #    pickle.dump(paths, f)
+                    # import IPython
+                    # IPython.embed()
+                    # for path in paths:
+                    #     obs = path['observations'][:,:3]
+                    #     import matplotlib.pyplot as plt
+                    #     fig = plt.figure()
+                    #     ax = fig.gca(projection='3d')
+                    #     ax.plot(obs[:,0], obs[:,1], obs[:,2])
+                    # plt.show()  
 
-                    # debugging
+                   
                     """
                     if itr % 1 == 0:
                         logger.log("Saving visualization of paths")

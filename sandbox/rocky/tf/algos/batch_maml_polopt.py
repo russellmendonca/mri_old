@@ -1,7 +1,7 @@
-import matplotlib
-matplotlib.use('Pdf')
+# import matplotlib
+# matplotlib.use('Pdf')
 
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 import os.path as osp
 import rllab.misc.logger as logger
@@ -15,6 +15,9 @@ from sandbox.rocky.tf.samplers.batch_sampler import BatchSampler
 from sandbox.rocky.tf.samplers.vectorized_sampler import VectorizedSampler
 from sandbox.rocky.tf.spaces import Discrete
 from rllab.sampler.stateful_pool import singleton_pool
+from sandbox.rocky.tf.policies.minimal_gauss_mlp_policy import GaussianMLPPolicy
+import pickle
+import joblib
 
 class BatchMAMLPolopt(RLAlgorithm):
     """
@@ -50,6 +53,9 @@ class BatchMAMLPolopt(RLAlgorithm):
             force_batch_sampler=False,
             use_maml=True,
             load_policy=None,
+            numExpertPolicies = 10,
+            expert_weight= 1,
+            expertDataInfo = {},
             **kwargs
     ):
         """
@@ -97,12 +103,21 @@ class BatchMAMLPolopt(RLAlgorithm):
         self.fixed_horizon = fixed_horizon
         self.meta_batch_size = meta_batch_size # number of tasks
         self.num_grad_updates = num_grad_updates # number of gradient steps during training
+        self.expertPolicies = {}
+        self.numExpertPolicies = numExpertPolicies
+        self.a1 = expert_weight
+        self.expertDataLoc = expertDataInfo['expert_loc']
+        self.expertDataItr = expertDataInfo['expert_itr']
 
+        
         if sampler_cls is None:
             if singleton_pool.n_parallel > 1:
                 sampler_cls = BatchSampler
             else:
                 sampler_cls = VectorizedSampler
+        #assert singleton_pool.n_parallel == 1
+       
+
         if sampler_args is None:
             sampler_args = dict()
         sampler_args['n_envs'] = self.meta_batch_size
@@ -124,20 +139,50 @@ class BatchMAMLPolopt(RLAlgorithm):
         assert type(paths) == dict
         return paths
 
-    def process_samples(self, itr, paths, prefix='', log=True):
-        return self.sampler.process_samples(itr, paths, prefix=prefix, log=log)
+    def process_samples(self, itr, paths, prefix='', log=True, dictPaths = None):
+        return self.sampler.process_samples(itr, paths, prefix=prefix, log=log, dictPaths = dictPaths)
+
+
+    def expert_logL_bootstrap(self, samples_data , learner_env_goals):
+
+        #returnDict = {}
+        for i, expertNum in enumerate(learner_env_goals):
+            policy = self.expertPolicies[expertNum]
+            expert_logL_traces = policy.compute_stateAction_log_likelihood(samples_data[i]["observations"], samples_data[i]["actions"])
+            samples_data[i]['rewards'] =  expert_logL_traces 
+            samples_data[i]['rl_rewards'] = samples_data[i]['rewards']
+        return samples_data
+
+
+    def load_expert_policies(self, sess):
+
+       
+        for task in range(self.numExpertPolicies):
+          
+            print("######LOADING EXPERT "+str(task)+"##############")
+            
+            policy = GaussianMLPPolicy(name='expert'+str(task), env_spec=self.env.spec, hidden_nonlinearity=tf.nn.relu, hidden_sizes=(100, 100))
+            weights  = pickle.load(open(self.expertDataLoc+"Task_"+str(task)+"/itr_"+str(self.expertDataItr)+".pkl" , 'rb'))
+            for key in policy.mean_params:
+                sess.run(tf.assign(policy.mean_params[key], weights['mean_params'][key]))
+            sess.run(tf.assign(policy.std_params , weights['std_params']))
+            self.expertPolicies[task] = policy
 
     def train(self):
         # TODO - make this a util
         flatten_list = lambda l: [item for sublist in l for item in sublist]
-
-        with tf.Session() as sess:
+        config = tf.ConfigProto()
+        config.gpu_options.allow_growth=True
+    
+        with tf.Session(config = config) as sess:
             # Code for loading a previous policy. Somewhat hacky because needs to be in sess.
-            if self.load_policy is not None:
-                import joblib
-                self.policy = joblib.load(self.load_policy)['policy']
+            # if self.load_policy is not None:               
+            #     self.policy = joblib.load(self.load_policy)['policy']
+
+            self.load_expert_policies(sess)
             self.init_opt()
             # initialize uninitialized vars  (only initialize vars that were not loaded)
+           
             uninit_vars = []
             for var in tf.global_variables():
                 # note - this is hacky, may be better way to do this in newer TF.
@@ -149,6 +194,7 @@ class BatchMAMLPolopt(RLAlgorithm):
 
             self.start_worker()
             start_time = time.time()
+          
             for itr in range(self.start_itr, self.n_itr):
                 itr_start_time = time.time()
                 with logger.prefix('itr #%d | ' % itr):
@@ -162,6 +208,7 @@ class BatchMAMLPolopt(RLAlgorithm):
                     self.policy.switch_to_init_dist()  # Switch to pre-update policy
 
                     all_samples_data, all_paths = [], []
+                    assert self.num_grad_updates == 1
                     for step in range(self.num_grad_updates+1):
                         #if step > 0:
                         #    import pdb; pdb.set_trace() # test param_vals functions.
@@ -174,13 +221,18 @@ class BatchMAMLPolopt(RLAlgorithm):
                         for key in paths.keys():  # the keys are the tasks
                             # don't log because this will spam the consol with every task.
                             samples_data[key] = self.process_samples(itr, paths[key], log=False)
+
+                        if step ==1:
+                            samples_data = self.expert_logL_bootstrap(samples_data , learner_env_goals)                            
                         all_samples_data.append(samples_data)
-                        # for logging purposes only
-                        self.process_samples(itr, flatten_list(paths.values()), prefix=str(step), log=True)
+                        # for logging purposes only  
+                        self.process_samples(itr, flatten_list(paths.values()), dictPaths = paths, prefix=str(step), log=True)
+
                         logger.log("Logging diagnostics...")
                         self.log_diagnostics(flatten_list(paths.values()), prefix=str(step))
                         if step < self.num_grad_updates:
                             logger.log("Computing policy updates...")
+
                             self.policy.compute_updated_dists(samples_data)
 
 
@@ -192,66 +244,22 @@ class BatchMAMLPolopt(RLAlgorithm):
                     if self.store_paths:
                         params["paths"] = all_samples_data[-1]["paths"]
                     logger.save_itr_params(itr, params)
+
+                   
                     logger.log("Saved")
                     logger.record_tabular('Time', time.time() - start_time)
                     logger.record_tabular('ItrTime', time.time() - itr_start_time)
 
                     logger.dump_tabular(with_prefix=False)
 
-                    # The rest is some example plotting code.
-                    # Plotting code is useful for visualizing trajectories across a few different tasks.
-                    if False and itr % 2 == 0 and self.env.observation_space.shape[0] <= 4: # point-mass
-                        logger.log("Saving visualization of paths")
-                        for ind in range(min(5, self.meta_batch_size)):
-                            plt.clf()
-                            plt.plot(learner_env_goals[ind][0], learner_env_goals[ind][1], 'k*', markersize=10)
-                            plt.hold(True)
-
-                            preupdate_paths = all_paths[0]
-                            postupdate_paths = all_paths[-1]
-
-                            pre_points = preupdate_paths[ind][0]['observations']
-                            post_points = postupdate_paths[ind][0]['observations']
-                            plt.plot(pre_points[:,0], pre_points[:,1], '-r', linewidth=2)
-                            plt.plot(post_points[:,0], post_points[:,1], '-b', linewidth=1)
-
-                            pre_points = preupdate_paths[ind][1]['observations']
-                            post_points = postupdate_paths[ind][1]['observations']
-                            plt.plot(pre_points[:,0], pre_points[:,1], '--r', linewidth=2)
-                            plt.plot(post_points[:,0], post_points[:,1], '--b', linewidth=1)
-
-                            pre_points = preupdate_paths[ind][2]['observations']
-                            post_points = postupdate_paths[ind][2]['observations']
-                            plt.plot(pre_points[:,0], pre_points[:,1], '-.r', linewidth=2)
-                            plt.plot(post_points[:,0], post_points[:,1], '-.b', linewidth=1)
-
-                            plt.plot(0,0, 'k.', markersize=5)
-                            plt.xlim([-0.8, 0.8])
-                            plt.ylim([-0.8, 0.8])
-                            plt.legend(['goal', 'preupdate path', 'postupdate path'])
-                            plt.savefig(osp.join(logger.get_snapshot_dir(), 'prepost_path'+str(ind)+'.png'))
-                    elif False and itr % 2 == 0:  # swimmer or cheetah
-                        logger.log("Saving visualization of paths")
-                        for ind in range(min(5, self.meta_batch_size)):
-                            plt.clf()
-                            goal_vel = learner_env_goals[ind]
-                            plt.title('Swimmer paths, goal vel='+str(goal_vel))
-                            plt.hold(True)
-
-                            prepathobs = all_paths[0][ind][0]['observations']
-                            postpathobs = all_paths[-1][ind][0]['observations']
-                            plt.plot(prepathobs[:,0], prepathobs[:,1], '-r', linewidth=2)
-                            plt.plot(postpathobs[:,0], postpathobs[:,1], '--b', linewidth=1)
-                            plt.plot(prepathobs[-1,0], prepathobs[-1,1], 'r*', markersize=10)
-                            plt.plot(postpathobs[-1,0], postpathobs[-1,1], 'b*', markersize=10)
-                            plt.xlim([-1.0, 5.0])
-                            plt.ylim([-1.0, 1.0])
-
-                            plt.legend(['preupdate path', 'postupdate path'], loc=2)
-                            plt.savefig(osp.join(logger.get_snapshot_dir(), 'swim1d_prepost_itr'+str(itr)+'_id'+str(ind)+'.pdf'))
+                   
+                 
         self.shutdown_worker()
 
     def log_diagnostics(self, paths, prefix):
+
+        
+
         self.env.log_diagnostics(paths, prefix)
         self.policy.log_diagnostics(paths, prefix)
         self.baseline.log_diagnostics(paths)

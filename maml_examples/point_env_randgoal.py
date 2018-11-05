@@ -12,6 +12,7 @@ class PointEnvRandGoal(Env):
     def observation_space(self):
         return Box(low=-np.inf, high=np.inf, shape=(2,))
 
+    # file_path=ENV_OPTIONS[option])
     @property
     def action_space(self):
         return Box(low=-0.1, high=0.1, shape=(2,))
@@ -40,7 +41,8 @@ class PointEnvRandGoal(Env):
         x -= self._goal[0]
         y -= self._goal[1]
         reward = - (x ** 2 + y ** 2) ** 0.5
-        done = abs(x) < 0.01 and abs(y) < 0.01
+        # done = abs(x) < 0.01 and abs(y) < 0.01
+        done = False
         next_observation = np.copy(self._state)
         return Step(observation=next_observation, reward=reward, done=done, goal=self._goal)
 

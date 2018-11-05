@@ -24,12 +24,18 @@ meta_step_size = 0.01
 
 use_maml = True
 
+env = TfEnv(normalize(PointEnvRandGoal()))
+
+
+
 for fast_learning_rate in fast_learning_rates:
     for learning_rate in learning_rates:
         for bas in baselines:
             stub(globals())
 
             env = TfEnv(normalize(PointEnvRandGoal()))
+
+
             policy = MAMLGaussianMLPPolicy(
                 name="policy",
                 env_spec=env.spec,

@@ -3,7 +3,12 @@ from rllab.misc import tensor_utils
 import time
 
 
-def rollout(env, agent, max_path_length=np.inf, animated=False, speedup=1, save_video=True, video_filename='sim_out.mp4', reset_arg=None):
+
+
+def rollout(env, agent, max_path_length=np.inf, animated=False, speedup=1, save_video=False, video_filename='sim_out.mp4', reset_arg=None):
+
+
+
     observations = []
     actions = []
     rewards = []
@@ -33,7 +38,14 @@ def rollout(env, agent, max_path_length=np.inf, animated=False, speedup=1, save_
             time.sleep(timestep / speedup)
             if save_video:
                 from PIL import Image
-                image = env.wrapped_env.wrapped_env.get_viewer().get_image()
+
+                # import ipdb
+                # ipdb.set_trace()
+
+                # while 'get_viewer' not in dir(env):
+                #     env = env.wrapped_env
+                
+                image = env.get_viewer().get_image()
                 pil_image = Image.frombytes('RGB', (image[1], image[2]), image[0])
                 images.append(np.flipud(np.array(pil_image)))
 
