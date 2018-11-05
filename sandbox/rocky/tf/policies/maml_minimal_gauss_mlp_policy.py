@@ -338,20 +338,22 @@ class MAMLGaussianMLPPolicy(StochasticPolicy, Serializable):
         
 
         flat_obs = self.observation_space.flatten_n(observations)
-
         result = self._cur_f_dist(flat_obs)
-
-
-        if len(result) == 2:
-            # NOTE - this code assumes that there aren't 2 meta tasks in a batch
-            means, log_stds = result
-        else:
-            means = np.array([res[0] for res in result])[:,0,:]
-            log_stds = np.array([res[1] for res in result])[:,0,:]
+        means = np.array([res[0] for res in result])[:,0,:]
+        log_stds = np.array([res[1] for res in result])[:,0,:]
 
         rnd = np.random.normal(size=means.shape)
         actions = rnd * np.exp(log_stds) + means
         return actions, dict(mean=means, log_std=log_stds)
+
+    def compute_preUpdatePolicy_logLikelihood(self, observations ,actions):
+        # this function takes a numpy array observations and outputs sampled actions.
+        # Assumes that there is one observation per post-update policy distr
+        
+        flat_obs = self.observation_space.flatten_n(observations)
+        means, log_stds = self._cur_f_dist(flat_obs)
+
+        return self._dist.log_likelihood(actions, {"mean" : means , "log_std" : log_stds})
 
     @property
     def distribution(self):

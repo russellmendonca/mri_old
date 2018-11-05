@@ -154,6 +154,14 @@ class BatchMAMLPolopt(RLAlgorithm):
         return samples_data
 
 
+    def load_expert_trajectories(self):
+
+        import joblib
+        expertTrajDir = '/home/russellm/iclr18/data/expert_trajs/Expert_trajs_pusherV1_numTrajs100_itr300/'
+        self.expertTrajs = {}
+        for task in range(20):
+            self.expertTrajs[task] = joblib.load(expertTrajDir+str(task)+'.pkl')
+      
     def load_expert_policies(self, sess):
 
        
@@ -180,9 +188,10 @@ class BatchMAMLPolopt(RLAlgorithm):
             #     self.policy = joblib.load(self.load_policy)['policy']
 
             self.load_expert_policies(sess)
+            self.load_expert_trajectories()
             self.init_opt()
-            # initialize uninitialized vars  (only initialize vars that were not loaded)
-           
+            self.init_opt_offPolicy()
+         
             uninit_vars = []
             for var in tf.global_variables():
                 # note - this is hacky, may be better way to do this in newer TF.
@@ -194,6 +203,7 @@ class BatchMAMLPolopt(RLAlgorithm):
 
             self.start_worker()
             start_time = time.time()
+
           
             for itr in range(self.start_itr, self.n_itr):
                 itr_start_time = time.time()
@@ -204,41 +214,74 @@ class BatchMAMLPolopt(RLAlgorithm):
                     while 'sample_goals' not in dir(env):
                         env = env.wrapped_env
                     learner_env_goals = env.sample_goals(self.meta_batch_size)
-
                     self.policy.switch_to_init_dist()  # Switch to pre-update policy
 
                     all_samples_data, all_paths = [], []
                     assert self.num_grad_updates == 1
-                    for step in range(self.num_grad_updates+1):
-                        #if step > 0:
-                        #    import pdb; pdb.set_trace() # test param_vals functions.
-                        logger.log('** Step ' + str(step) + ' **')
+
+                    #OnPolicy Iteration
+                    if (itr+1)%3 == 0:
+
+                        for step in range(2):
+                      
+                            logger.log('** Step ' + str(step) + ' **')
+                            logger.log("Obtaining samples...")
+                            paths = self.obtain_samples(itr, reset_args=learner_env_goals, log_prefix=str(step))
+                            all_paths.append(paths)
+                            logger.log("Processing samples...")
+                            samples_data = {}
+                            for key in paths.keys():  # the keys are the tasks
+                                # don't log because this will spam the consol with every task.
+                                samples_data[key] = self.process_samples(itr, paths[key], log=False)
+                            all_samples_data.append(samples_data)
+
+                            # for logging purposes only  
+                            self.process_samples(itr, flatten_list(paths.values()), dictPaths = paths, prefix=str(step), log=True)
+                            logger.log("Logging diagnostics...")
+                            self.log_diagnostics(flatten_list(paths.values()), prefix=str(step))
+
+                            if step == 0:
+                                logger.log("Computing policy updates...")
+                                self.policy.compute_updated_dists(samples_data)
+
+                            elif step ==1:
+                                samples_data = self.expert_logL_bootstrap(samples_data , learner_env_goals)
+
+                        logger.log("Optimizing policy...")
+                        dagger = False
+                        if dagger:
+                            self.optimize_policy(itr, all_samples_data)
+
+                    else:
+                        logger.log('Sampling once from meta-Policy')
                         logger.log("Obtaining samples...")
-                        paths = self.obtain_samples(itr, reset_args=learner_env_goals, log_prefix=str(step))
+                        paths = self.obtain_samples(itr, reset_args=learner_env_goals, log_prefix='0')
                         all_paths.append(paths)
                         logger.log("Processing samples...")
                         samples_data = {}
+
                         for key in paths.keys():  # the keys are the tasks
                             # don't log because this will spam the consol with every task.
                             samples_data[key] = self.process_samples(itr, paths[key], log=False)
-
-                        if step ==1:
-                            samples_data = self.expert_logL_bootstrap(samples_data , learner_env_goals)                            
                         all_samples_data.append(samples_data)
-                        # for logging purposes only  
-                        self.process_samples(itr, flatten_list(paths.values()), dictPaths = paths, prefix=str(step), log=True)
+    
+                        initialTheta_logProbs = np.array([ self.policy.compute_preUpdatePolicy_logLikelihood(samples_data[key]['observations'] , samples_data[key]['actions']) for key in samples_data])
+                    
+                        num_imSteps = 20
+                        logger.log('Off-policy Optimization')
+                        for i in range(num_imSteps):
+                            print('Step '+str(i))
 
-                        logger.log("Logging diagnostics...")
-                        self.log_diagnostics(flatten_list(paths.values()), prefix=str(step))
-                        if step < self.num_grad_updates:
-                            logger.log("Computing policy updates...")
+                            currTheta_logProbs = np.array([ self.policy.compute_preUpdatePolicy_logLikelihood(samples_data[key]['observations'] , samples_data[key]['actions']) for key in samples_data])
+                            traj_imp_weights = self.compute_traj_imp_weights(np.exp(currTheta_logProbs - initialTheta_logProbs))
+                            expert_data = {}
+                            for i , key in enumerate(learner_env_goals):
+                                expert_data[i] = self.process_samples(itr, self.expertTrajs[key], log = False)
+                                samples_data[i]['traj_imp_weights'] = traj_imp_weights[i]
 
-                            self.policy.compute_updated_dists(samples_data)
+                          
+                            self.offPolicy_optimization_step(samples_data , expert_data)
 
-
-                    logger.log("Optimizing policy...")
-                    # This needs to take all samples_data so that it can construct graph for meta-optimization.
-                    self.optimize_policy(itr, all_samples_data)
                     logger.log("Saving snapshot...")
                     params = self.get_itr_snapshot(itr, all_samples_data[-1])  # , **kwargs)
                     if self.store_paths:
@@ -252,9 +295,17 @@ class BatchMAMLPolopt(RLAlgorithm):
 
                     logger.dump_tabular(with_prefix=False)
 
-                   
-                 
+                       
+                     
         self.shutdown_worker()
+
+    def compute_traj_imp_weights(self, imp_weights):
+        result = [] ; product = 1
+        for i in range(len(imp_weights)):
+            product*=imp_weights[i]
+            result.append(product)
+        return np.array(result)
+            
 
     def log_diagnostics(self, paths, prefix):
 

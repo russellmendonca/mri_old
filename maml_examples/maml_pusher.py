@@ -90,7 +90,7 @@ for meta_batch_size in meta_batch_sizes:
                 snapshot_mode="all",
                 #python_command='python3',
                 seed=1,
-                exp_prefix='mri_onPolicy_pusherV1',
+                exp_prefix='trial',
                 exp_name='fbs'+str(fast_batch_size)+'_mbs'+str(meta_batch_size)+'_flr_' + str(fast_learning_rate) + 'metalr_' + str(meta_step_size),
                 plot=False,
                 sync_s3_pkl=True,

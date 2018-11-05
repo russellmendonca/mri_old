@@ -23,7 +23,7 @@ class FirstOrderOptimizer(Serializable):
             self,
             tf_optimizer_cls=None,
             tf_optimizer_args=None,
-            max_epochs=1000,
+            max_epochs=1,
             tolerance=1e-6,
             batch_size=32,
             callback=None,
