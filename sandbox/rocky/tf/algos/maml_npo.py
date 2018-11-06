@@ -221,7 +221,6 @@ class MAMLNPO(BatchMAMLPolopt):
 
         input_list += obs_list + action_list + adv_list + imp_list  + expert_obs_list + expert_action_list
 
-        print('Optimizing')
         self.offPolicy_optimizer.optimize(input_list)
 
 

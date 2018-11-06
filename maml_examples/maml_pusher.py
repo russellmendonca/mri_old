@@ -29,9 +29,10 @@ meta_batch_sizes = [20]  # 10 also works, but much less stable, 20 is fairly sta
 max_path_length = 150
 num_grad_updates = 1
 meta_step_size = 0.01
-
+num_imSteps = 50
 use_maml = True
 
+ratio = '_5_1'
 expertDataLoc = '/home/russellm/mri_onPolicy/expertPolicyWeights/TRPO-push-20X20-v1/'
 expertDataItr = 300
 
@@ -67,6 +68,7 @@ for meta_batch_size in meta_batch_sizes:
                 use_maml=use_maml,
                 step_size=meta_step_size,
                 numExpertPolicies = 20,
+                num_imSteps = num_imSteps,
                 expertDataInfo = {'expert_loc': expertDataLoc , 'expert_itr' : expertDataItr},
                 plot=False,
             )
@@ -90,7 +92,7 @@ for meta_batch_size in meta_batch_sizes:
                 snapshot_mode="all",
                 #python_command='python3',
                 seed=1,
-                exp_prefix='trial',
+                exp_prefix='mri_offPolicy_adamSteps'+str(num_imSteps)+ratio,
                 exp_name='fbs'+str(fast_batch_size)+'_mbs'+str(meta_batch_size)+'_flr_' + str(fast_learning_rate) + 'metalr_' + str(meta_step_size),
                 plot=False,
                 sync_s3_pkl=True,

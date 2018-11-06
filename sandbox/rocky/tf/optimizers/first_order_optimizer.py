@@ -105,61 +105,70 @@ class FirstOrderOptimizer(Serializable):
             extra_inputs = tuple()
         return self._opt_fun["f_loss"](*(tuple(inputs) + extra_inputs))
 
-    def optimize(self, inputs, extra_inputs=None, callback=None):
-
-        if len(inputs) == 0:
-            # Assumes that we should always sample mini-batches
-            raise NotImplementedError
-
-        f_loss = self._opt_fun["f_loss"]
-
-        if extra_inputs is None:
-            extra_inputs = tuple()
-
-        last_loss = f_loss(*(tuple(inputs) + extra_inputs))
-
-        start_time = time.time()
-
-        dataset = BatchDataset(inputs, self._batch_size, extra_inputs=extra_inputs)
+    def optimize(self, inputs):
 
         sess = tf.get_default_session()
+        sess.run(self._train_op, dict(list(zip(self._input_vars, inputs))))
 
-        for epoch in range(self._max_epochs):
-            if self._verbose:
-                logger.log("Epoch %d" % (epoch))
-                progbar = pyprind.ProgBar(len(inputs[0]))
+    # def optimize(self, inputs, extra_inputs=None, callback=None):
 
-            for batch in dataset.iterate(update=True):
-                if self._init_train_op is not None:
-                    sess.run(self._init_train_op, dict(list(zip(self._input_vars, batch))))
-                    self._init_train_op = None  # only use it once
-                else:
-                    sess.run(self._train_op, dict(list(zip(self._input_vars, batch))))
+    #     if len(inputs) == 0:
+    #         # Assumes that we should always sample mini-batches
+    #         raise NotImplementedError
 
-                if self._verbose:
-                    progbar.update(len(batch[0]))
+    #     f_loss = self._opt_fun["f_loss"]
 
-            if self._verbose:
-                if progbar.active:
-                    progbar.stop()
+    #     if extra_inputs is None:
+    #         extra_inputs = tuple()
 
-            new_loss = f_loss(*(tuple(inputs) + extra_inputs))
+    #     last_loss = f_loss(*(tuple(inputs) + extra_inputs))
 
-            if self._verbose:
-                logger.log("Epoch: %d | Loss: %f" % (epoch, new_loss))
-            if self._callback or callback:
-                elapsed = time.time() - start_time
-                callback_args = dict(
-                    loss=new_loss,
-                    params=self._target.get_param_values(trainable=True) if self._target else None,
-                    itr=epoch,
-                    elapsed=elapsed,
-                )
-                if self._callback:
-                    self._callback(callback_args)
-                if callback:
-                    callback(**callback_args)
+    #     start_time = time.time()
 
-            if abs(last_loss - new_loss) < self._tolerance:
-                break
-            last_loss = new_loss
+    #     dataset = BatchDataset(inputs, self._batch_size, extra_inputs=extra_inputs)
+
+    #     sess = tf.get_default_session()
+    #     import ipdb
+    #     ipdb.set_trace()
+
+    #     for epoch in range(self._max_epochs):
+    #         if self._verbose:
+    #             logger.log("Epoch %d" % (epoch))
+    #             progbar = pyprind.ProgBar(len(inputs[0]))
+
+    #         for batch in dataset.iterate(update=True):
+    #             if self._init_train_op is not None:
+    #                 sess.run(self._init_train_op, dict(list(zip(self._input_vars, batch))))
+    #                 self._init_train_op = None  # only use it once
+    #             else:
+    #                 print('start ')
+    #                 sess.run(self._train_op, dict(list(zip(self._input_vars, batch))))
+    #                 print('end')
+
+    #             if self._verbose:
+    #                 progbar.update(len(batch[0]))
+
+    #         if self._verbose:
+    #             if progbar.active:
+    #                 progbar.stop()
+
+    #         new_loss = f_loss(*(tuple(inputs) + extra_inputs))
+
+    #         if self._verbose:
+    #             logger.log("Epoch: %d | Loss: %f" % (epoch, new_loss))
+    #         if self._callback or callback:
+    #             elapsed = time.time() - start_time
+    #             callback_args = dict(
+    #                 loss=new_loss,
+    #                 params=self._target.get_param_values(trainable=True) if self._target else None,
+    #                 itr=epoch,
+    #                 elapsed=elapsed,
+    #             )
+    #             if self._callback:
+    #                 self._callback(callback_args)
+    #             if callback:
+    #                 callback(**callback_args)
+
+    #         if abs(last_loss - new_loss) < self._tolerance:
+    #             break
+    #         last_loss = new_loss

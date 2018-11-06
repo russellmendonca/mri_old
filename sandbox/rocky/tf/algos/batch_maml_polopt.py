@@ -56,6 +56,7 @@ class BatchMAMLPolopt(RLAlgorithm):
             numExpertPolicies = 10,
             expert_weight= 1,
             expertDataInfo = {},
+            num_imSteps = 50,
             **kwargs
     ):
         """
@@ -88,6 +89,7 @@ class BatchMAMLPolopt(RLAlgorithm):
         self.scope = scope
         self.n_itr = n_itr
         self.start_itr = start_itr
+        self.num_imSteps = num_imSteps
         # batch_size is the number of trajectories for one fast grad update.
         # self.batch_size is the number of total transitions to collect.
         self.batch_size = batch_size * max_path_length * meta_batch_size
@@ -220,8 +222,8 @@ class BatchMAMLPolopt(RLAlgorithm):
                     assert self.num_grad_updates == 1
 
                     #OnPolicy Iteration
-                    if (itr+1)%3 == 0:
-
+                    if itr%5 != 0:
+                    #if False:
                         for step in range(2):
                       
                             logger.log('** Step ' + str(step) + ' **')
@@ -249,8 +251,8 @@ class BatchMAMLPolopt(RLAlgorithm):
 
                         logger.log("Optimizing policy...")
                         dagger = False
-                        if dagger:
-                            self.optimize_policy(itr, all_samples_data)
+                        #if dagger:
+                        self.optimize_policy(itr, all_samples_data)
 
                     else:
                         logger.log('Sampling once from meta-Policy')
@@ -263,23 +265,23 @@ class BatchMAMLPolopt(RLAlgorithm):
                         for key in paths.keys():  # the keys are the tasks
                             # don't log because this will spam the consol with every task.
                             samples_data[key] = self.process_samples(itr, paths[key], log=False)
-                        all_samples_data.append(samples_data)
-    
-                        initialTheta_logProbs = np.array([ self.policy.compute_preUpdatePolicy_logLikelihood(samples_data[key]['observations'] , samples_data[key]['actions']) for key in samples_data])
-                    
-                        num_imSteps = 20
-                        logger.log('Off-policy Optimization')
-                        for i in range(num_imSteps):
-                            print('Step '+str(i))
+                            samples_data[key]['initialTheta_logProbs'] =  np.array(self.policy.compute_preUpdatePolicy_logLikelihood(samples_data[key]['observations'] , samples_data[key]['actions'])) 
 
-                            currTheta_logProbs = np.array([ self.policy.compute_preUpdatePolicy_logLikelihood(samples_data[key]['observations'] , samples_data[key]['actions']) for key in samples_data])
-                            traj_imp_weights = self.compute_traj_imp_weights(np.exp(currTheta_logProbs - initialTheta_logProbs))
+                        all_samples_data.append(samples_data)
+                        
+                        
+                        logger.log('Off-policy Optimization')
+                        for i in range(self.num_imSteps):
+                            
+                        
                             expert_data = {}
+
                             for i , key in enumerate(learner_env_goals):
                                 expert_data[i] = self.process_samples(itr, self.expertTrajs[key], log = False)
-                                samples_data[i]['traj_imp_weights'] = traj_imp_weights[i]
-
-                          
+                                
+                                currTheta_logProbs = np.array(self.policy.compute_preUpdatePolicy_logLikelihood(samples_data[i]['observations'] , samples_data[i]['actions']))
+                                samples_data[i]['traj_imp_weights'] =  self.compute_traj_imp_weights(np.exp(currTheta_logProbs - samples_data[i]['initialTheta_logProbs']))
+                       
                             self.offPolicy_optimization_step(samples_data , expert_data)
 
                     logger.log("Saving snapshot...")
@@ -299,10 +301,10 @@ class BatchMAMLPolopt(RLAlgorithm):
                      
         self.shutdown_worker()
 
-    def compute_traj_imp_weights(self, imp_weights):
+    def compute_traj_imp_weights(self, imp_ratios):
         result = [] ; product = 1
-        for i in range(len(imp_weights)):
-            product*=imp_weights[i]
+        for i in range(len(imp_ratios)):
+            product*=imp_ratios[i]
             result.append(product)
         return np.array(result)
             
